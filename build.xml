@@ -1,0 +1,125 @@
+<project name="ts-epub" default="convert-all">
+	<path id="classpath">
+		<fileset dir="jar">
+			<include name="*.jar"/>
+		</fileset>
+	</path>
+
+  <taskdef resource="net/sf/antcontrib/antcontrib.properties">
+    <classpath>
+      <path refid="classpath"/>
+    </classpath>
+  </taskdef>
+
+	<target name="init">
+		<mkdir dir="dist"/>
+	</target>
+	
+	<target name="convert-all" depends="init">
+    <mkdir dir="tmp"/>
+    <foreach param="filename" target="convert">
+      <path>
+        <fileset dir="input" includes="**/*.epub"/>
+      </path>
+    </foreach>
+	</target>
+
+  <target name="convert">
+		<xmlcatalog id="all">
+			<dtd publicId="-//W3C//DTD XHTML 1.1//EN" location="jar/dummy.dtd"/>
+		</xmlcatalog>
+
+    <basename property="dirname" file="${filename}" suffix=".epub"/>
+    <unzip src="${filename}" dest="tmp/${dirname}"/>
+    <exec executable="sh" outputproperty="index">
+      <arg value="-c"/>
+      <!-- in hindsight, sed probably would have been easier -->
+      <arg value="cat tmp/${dirname}/META-INF/container.xml | grep -o 'full-path=&quot;[^&quot;]*&quot;' | grep -o '&quot;[^&quot;]*&quot;' | grep -o '[^&quot;]*'"/>
+    </exec>
+
+    <xslt in="tmp/${dirname}/${index}" out="dist/${dirname}/index.html" style="conf/toc.xsl">
+      <classpath>
+        <path refid="classpath"/>
+      </classpath>
+      <xmlcatalog refid="all"/>
+    </xslt>
+
+    <!--
+    identify -format '<file src="%f" width="%w" height="%h"/>\n' t*.jpg
+convert bookcover.jpg -thumbnail '100x100>' test.jpg
+    -->
+    <foreach param="path" target="thumbnails">
+      <path>
+        <fileset dir="tmp/${dirname}/OPS/" includes="**/*.gif,**/*.jpg,**/*.png" excludes="**/*.thumb.*"/>
+      </path>
+    </foreach>
+
+    <!-- FIXME: "OPS" is used almost everywhere but not a hard standard. -->
+    <xslt basedir="tmp/${dirname}/OPS/" destdir="dist/${dirname}/" extension=".html" includes="**/*.xml"
+		style="conf/article.xsl">
+			<classpath>
+				<path refid="classpath"/>
+			</classpath>
+      <xmlcatalog refid="all"/>
+		</xslt>
+
+    <copy todir="dist/${dirname}/" file="jar/treesaver-0.9.1.js"/>
+    <copy todir="dist/${dirname}/" file="jar/resources.html"/>
+    <copy todir="dist/${dirname}/" file="jar/style.css"/>
+    <copy todir="dist/${dirname}/">
+      <fileset dir="tmp/${dirname}/OPS/">
+        <include name="**/*.css"/>
+        <include name="**/*.gif"/>
+        <include name="**/*.png"/>
+        <include name="**/*.jpg"/>
+      </fileset>
+    </copy>
+
+
+
+  </target>
+
+  <target name="thumbnails">
+    <!-- create the thumbnails for these sizes (if the image is larger than said size.) -->
+    <foreach param="size" list="600,280,100" target="create-thumbnail" inheritall="true">
+    </foreach>
+
+    <!-- create a manifest file for each image -->
+    <propertyregex property="thumbs" input="${path}" regexp="(.*)\.(gif|png|jpg)" select="\1-*.\2" casesensitive="false"/>
+    <propertyregex property="thumbs-manifest" input="${path}" regexp="(.*)\.(gif|png|jpg)" select="\1.ixml" casesensitive="false"/>
+    <basename property="thumb-name" file="${path}"/>
+    <exec executable="sh">
+      <arg value="-c"/>
+      <arg value="echo '&lt;?xml version=&quot;1.0&quot; encoding=&quot;utf-8&quot;?&gt;\n&lt;thumbs src=&quot;${thumb-name}&quot;&gt;' > ${thumbs-manifest}"/>
+    </exec>
+
+    <exec executable="sh">
+      <arg value="-c"/>
+      <arg value="identify -format '  &lt;file src=&quot;%f&quot; width=&quot;%w&quot; height=&quot;%h&quot;/&gt;\n' ${thumbs} >> ${thumbs-manifest}"/>
+    </exec>
+
+    <exec executable="sh">
+      <arg value="-c"/>
+      <arg value="echo '&lt;/thumbs&gt;' >> ${thumbs-manifest}"/>
+    </exec>
+  </target>
+
+  <target name="create-thumbnail">
+    <!-- convert i007.jpg -thumbnail '1000x1000>' -set filename:area '%wx%h' 'i007-%[filename:area].jpg' -->
+    <propertyregex property="thumb" input="${path}" regexp="(.*)\.(gif|png|jpg)" select="\1-%[filename:area].thumb.\2" casesensitive="false"/>
+    <exec executable="convert">
+      <arg value="${path}"/>
+      <arg value="-thumbnail"/>
+      <arg value="${size}x${size}>"/>
+      <arg value="-set"/>
+      <arg value="filename:area"/>
+      <arg value="%wx%h"/>
+      <arg value="${thumb}"/>
+    </exec>
+  </target>
+
+	<target name="clean">
+    <delete dir="tmp"/>
+		<delete dir="dist"/>
+	</target>
+</project>
